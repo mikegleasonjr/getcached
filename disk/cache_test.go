@@ -14,6 +14,9 @@ func TestCache(t *testing.T) {
 		t.Fatalf("unexpected error: %q", err)
 	}
 	defer os.RemoveAll(dir)
-
-	test.Cache(t, New(WithDir(dir)))
+	c, err := New(WithDir(dir))
+	if err != nil {
+		t.Fatalf("unexpected error: %q", err)
+	}
+	test.Cache(t, c)
 }

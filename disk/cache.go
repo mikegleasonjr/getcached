@@ -1,74 +1,85 @@
 package disk
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"io"
-
-	"github.com/peterbourgon/diskv"
+	"github.com/prologic/bitcask"
 )
 
-// TODO, use fixed-key length (MD5?)
-// https://github.com/peterbourgon/diskv/issues/40
+const (
+	defaultDir  = "/tmp"
+	defaultSize = 100 << 20 // 100mb
+	defaultSync = true
+)
 
 // Cache caches requests to disk.
 type Cache struct {
-	d *diskv.Diskv
+	db *bitcask.Bitcask
+}
+
+type opts struct {
+	dir  string
+	size uint64
+	sync bool
 }
 
 // New creates a Cache backed by diskv.
-func New(options ...func(*diskv.Options)) *Cache {
-	opts := &diskv.Options{}
+func New(options ...func(*opts)) (*Cache, error) {
+	o := &opts{
+		dir:  defaultDir,
+		size: defaultSize,
+		sync: defaultSync,
+	}
 
 	for _, option := range options {
-		option(opts)
+		option(o)
 	}
 
-	return &Cache{
-		d: diskv.New(*opts),
+	db, err := bitcask.Open(
+		o.dir,
+		bitcask.WithMaxDatafileSize(int(o.size)),
+		bitcask.WithSync(o.sync))
+	if err != nil {
+		return nil, err
 	}
+
+	return &Cache{db: db}, nil
 }
 
 // Get gets an item from the cache.
 func (c *Cache) Get(key string) ([]byte, bool) {
-	key = fixedLengthKey(key)
-
-	b, err := c.d.Read(key)
+	b, err := c.db.Get([]byte(key))
 	if err != nil {
 		return nil, false
 	}
-
 	return b, true
 }
 
 // Set saves a response to the cache as key.
 func (c *Cache) Set(key string, resp []byte) {
-	key = fixedLengthKey(key)
-	c.d.Write(key, resp)
+	c.db.Put([]byte(key), resp)
 }
 
 // Delete deletes an item from the cache.
 func (c *Cache) Delete(key string) {
-	key = fixedLengthKey(key)
-	c.d.Erase(key)
+	c.db.Delete([]byte(key))
 }
 
 // WithSize sets a cache maximum size.
-func WithSize(size uint64) func(*diskv.Options) {
-	return func(o *diskv.Options) {
-		o.CacheSizeMax = size
+func WithSize(size uint64) func(*opts) {
+	return func(o *opts) {
+		o.size = size
 	}
 }
 
 // WithDir sets a cache directory.
-func WithDir(dir string) func(*diskv.Options) {
-	return func(o *diskv.Options) {
-		o.BasePath = dir
+func WithDir(dir string) func(*opts) {
+	return func(o *opts) {
+		o.dir = dir
 	}
 }
 
-func fixedLengthKey(key string) string {
-	h := md5.New()
-	io.WriteString(h, key)
-	return hex.EncodeToString(h.Sum(nil))
+// WithSync makes the cache sync every writes.
+func WithSync(sync bool) func(*opts) {
+	return func(o *opts) {
+		o.sync = sync
+	}
 }
