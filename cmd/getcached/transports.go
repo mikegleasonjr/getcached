@@ -3,13 +3,33 @@ package main
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"time"
 )
 
 var (
 	// ErrResponseSize tells the response body exceeds a certain size.
 	ErrResponseSize = errors.New("response size exceeded")
 )
+
+// DefaultTransport is a default http.Roundtripper
+// with sensible defaults.
+func DefaultTransport() http.RoundTripper {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   3 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
 
 // BodySizeCheckerTransport replaces the response body with a
 // ReadCloser that returns an error when the body exceeds a certain

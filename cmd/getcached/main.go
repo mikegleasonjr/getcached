@@ -40,7 +40,7 @@ func main() {
 		getcached.WithCache(cache),
 		getcached.WithBufferPool(getcached.DefaultBufferPool),
 		getcached.WithErrorLogger(stderr),
-		getcached.WithProxyTransport(BodySizeCheckerTransport(int64(*maxbodysize), http.DefaultTransport)),
+		getcached.WithProxyTransport(BodySizeCheckerTransport(int64(*maxbodysize), DefaultTransport())),
 	)
 	mux := getMux(proxy)
 	registerPrometheusMetrics(memmon, diskmon)
