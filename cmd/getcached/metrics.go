@@ -5,6 +5,47 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	ns       = "getcached"
+	subs     = "cache"
+	locLabel = "loc"
+)
+
+var m *metrics
+
+type metrics struct {
+	collectors []*collector
+	up         *prometheus.Desc
+}
+
+func newMetrics() *metrics {
+	return &metrics{
+		up: prometheus.NewDesc(
+			prometheus.BuildFQName(ns, "", "up"),
+			"Is getcached up?",
+			nil, nil,
+		),
+	}
+}
+
+func (m *metrics) addCollector(loc string, monitor *getcached.Monitor) {
+	m.collectors = append(m.collectors, newCollector(loc, monitor))
+}
+
+func (m *metrics) Describe(ch chan<- *prometheus.Desc) {
+	ch <- m.up
+	for _, c := range m.collectors {
+		c.Describe(ch)
+	}
+}
+
+func (m *metrics) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(m.up, prometheus.GaugeValue, 1)
+	for _, c := range m.collectors {
+		c.Collect(ch)
+	}
+}
+
 type collector struct {
 	monitor   *getcached.Monitor
 	gets      *prometheus.Desc
@@ -16,10 +57,8 @@ type collector struct {
 	deletes   *prometheus.Desc
 }
 
-func newCollector(kind string, monitor *getcached.Monitor) *collector {
-	ns := "getcached"
-	subs := "cache"
-	constLabels := map[string]string{"kind": kind}
+func newCollector(loc string, monitor *getcached.Monitor) *collector {
+	constLabels := map[string]string{locLabel: loc}
 
 	return &collector{
 		monitor: monitor,
@@ -73,8 +112,6 @@ func (c *collector) Describe(ch chan<- *prometheus.Desc) {
 
 func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	s := c.monitor.Stats()
-
-	// TODO, up metric
 
 	ch <- prometheus.MustNewConstMetric(c.gets, prometheus.CounterValue, float64(s.Gets))
 	ch <- prometheus.MustNewConstMetric(c.hits, prometheus.CounterValue, float64(s.Hits))

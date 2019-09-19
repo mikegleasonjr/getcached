@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/die-net/lrucache/twotier"
 	"github.com/gregjones/httpcache"
@@ -29,16 +33,12 @@ func main() {
 	kingpin.Parse()
 
 	memmon, diskmon, cache := configureCaches(uint64(*memsize), *diskenabled, *diskdir, uint64(*disksize))
-	prometheus.MustRegister(newCollector("memory", memmon))
-	if diskmon != nil {
-		prometheus.MustRegister(newCollector("disk", diskmon))
-	}
-
 	proxy := getcached.New(getcached.WithCache(cache))
 	mux := getMux(proxy)
+	registerPrometheusMetrics(memmon, diskmon)
 
 	log.Infof("getcached:%s started and listening on %s", version, (*listen).String())
-	log.Fatal(http.ListenAndServe((*listen).String(), mux))
+	log.Fatal(gracefulServe((*listen).String(), mux))
 }
 
 func configureCaches(memsize uint64, diskenabled bool, diskdir string, disksize uint64) (memmon *getcached.Monitor, diskmon *getcached.Monitor, cache httpcache.Cache) {
@@ -47,7 +47,7 @@ func configureCaches(memsize uint64, diskenabled bool, diskdir string, disksize 
 	cache = memmon
 
 	if diskenabled {
-		diskcache := disk.New(disk.WithDir(diskdir), disk.WithSize(disksize))
+		diskcache := lru.New(lru.WithCache(disk.New(disk.WithDir(diskdir))), lru.WithSize(disksize))
 		diskmon = getcached.NewMonitor(diskcache)
 		cache = twotier.New(memmon, diskmon)
 	}
@@ -62,4 +62,42 @@ func getMux(proxy *getcached.Proxy) *http.ServeMux {
 	mux.Handle("/", proxy)
 
 	return mux
+}
+
+func registerPrometheusMetrics(mem, disk *getcached.Monitor) {
+	metrics := newMetrics()
+	metrics.addCollector("memory", mem)
+	if disk != nil {
+		metrics.addCollector("disk", disk)
+	}
+	prometheus.MustRegister(metrics)
+}
+
+func gracefulServe(addr string, handler http.Handler) error {
+	sigchan := make(chan os.Signal)
+	res := make(chan error, 1)
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		res <- srv.ListenAndServe()
+	}()
+
+	select {
+	case <-sigchan:
+	case err := <-res:
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), srv.WriteTimeout)
+	defer cancel()
+	srv.Shutdown(ctx)
+	return <-res
 }
