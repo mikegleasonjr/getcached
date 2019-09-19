@@ -2,6 +2,7 @@ package getcached
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -73,5 +74,19 @@ func WithProxyTransport(tr http.RoundTripper) func(*Proxy) {
 func WithCache(c httpcache.Cache) func(*Proxy) {
 	return func(p *Proxy) {
 		p.tr.Cache = c
+	}
+}
+
+// WithErrorLogger configures a Proxy to use an error logger.
+func WithErrorLogger(l *log.Logger) func(*Proxy) {
+	return func(p *Proxy) {
+		p.rp.ErrorLog = l
+	}
+}
+
+// WithBufferPool configures a Proxy to use a BufferPool.
+func WithBufferPool(pool httputil.BufferPool) func(*Proxy) {
+	return func(p *Proxy) {
+		p.rp.BufferPool = pool
 	}
 }
